@@ -1,0 +1,533 @@
+
+| Question                                                   | Answer                                                                                                                                                                                                     |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Should skill-triggering rules be mentioned in `AGENTS.md`? | **Yes.** `AGENTS.md` should define when a workflow should be used, for example: “When user asks `update docs`, run the `update-docs` workflow.”                                                            |
+| Should hooks map directly to skills?                       | Usually **no**. Hooks should call **deterministic scripts**, not rely on skill triggering. Hooks are enforcement; skills are agent procedure.                                                              |
+| Should routing rules be layered?                           | **Yes.** Use `AGENTS.md` as the root router, then route into domain-specific docs such as `docs/ai-rules/backend.md`, `frontend.md`, `docs-analysis.md`, `testing.md`, etc.                                |
+| For project understanding docs, are 3 files enough?        | **Not enough** for serious engineering. Your 3 are good starting points, but you also need architecture, data model, dependencies, runtime/deployment, security, testing, observability, and decision log. |
+| Best structure                                             | Create an `ai_context/` or `docs/project-intel/` directory with **8–12 markdown files**, each focused on one dimension of understanding.                                                                   |
+
+The core architecture should be:
+
+```text
+AGENTS.md
+  -> routes agent behavior
+  -> points to domain-specific rules
+  -> defines skill invocation hints
+  -> defines documentation/update policy
+
+.claude/skills/
+  -> reusable procedures/checklists
+
+.claude/hooks/
+  -> deterministic scripts
+  -> check git diff, docs freshness, tests, lint, schema changes
+
+docs/project-intel/
+  -> AI-generated project understanding docs
+  -> business, tech stack, architecture, APIs, data, runtime, testing, security, ops
+```
+
+## 1. Skill vs Hook: Correct Mental Model
+
+| Layer        | Purpose                          | Should contain reasoning? |         Should run automatically? | Example                                                    |
+| ------------ | -------------------------------- | ------------------------: | --------------------------------: | ---------------------------------------------------------- |
+| `AGENTS.md`  | Global routing and project rules |                       Yes |            Always loaded by agent | “If changing API, update OpenAPI and README.”              |
+| `rules/*.md` | Domain-specific behavior         |                       Yes |                Loaded when routed | “For backend changes, inspect controllers/services/repos.” |
+| Skill        | Reusable agent workflow          |                       Yes | Prefer manual or explicit trigger | `/update-docs`, `/analyze-project`                         |
+| Hook         | Deterministic guardrail          |            No, or minimal |                               Yes | `check-docs-required.sh`                                   |
+| Script       | Actual machine-checkable logic   |                        No |                 Called by hook/CI | Check if `src/**` changed without `docs/**` change         |
+| CI           | Final non-negotiable gate        |                        No |                     PR/build time | Fail PR if schema changed without docs                     |
+
+Your statement is right:
+
+> Hooks should be mapped to scripts, not skills, because skill trigger reliability is not enough for enforcement.
+
+More precisely:
+
+```text
+Skill = “AI, here is how to think and act.”
+Hook = “System, run this deterministic check.”
+Script = “Mechanically verify the condition.”
+CI = “Enforce it beyond the local agent.”
+```
+
+## 2. How to Trigger Skills from `AGENTS.md`
+
+In `AGENTS.md`, do not assume the agent will magically load the skill. Instead, write routing language that makes the behavior explicit.
+
+Example:
+
+```md
+# AGENTS.md
+
+## Workflow routing
+
+When the user asks to "update docs", "sync docs", "refresh documentation",
+"document this change", or "write project docs", use the `update-docs` workflow.
+
+When the user asks to understand, analyze, map, reverse-engineer, or dissect the project,
+use the `analyze-project` workflow.
+
+When the user asks for a code review, use the `code-review` workflow.
+
+When the task touches backend APIs, also read:
+
+- `ai_context/rules/backend-rules.md`
+- `ai_context/rules/api-rules.md`
+
+When the task touches frontend UI, also read:
+
+- `ai_context/rules/frontend-rules.md`
+
+When the task touches infrastructure, deployment, Docker, Kubernetes, Terraform, or CI/CD,
+also read:
+
+- `ai_context/rules/infra-rules.md`
+```
+
+This works better than burying all instructions in one huge file.
+
+## 3. Layered Routing Rules Pattern
+
+Use `AGENTS.md` as the root dispatcher.
+
+Recommended structure:
+
+```text
+.
+├── AGENTS.md
+├── README.md
+├── docs/
+│   ├── project-intel/
+│   │   ├── 00-index.md
+│   │   ├── 01-business-domain.md
+│   │   ├── 02-tech-stack.md
+│   │   ├── 03-architecture.md
+│   │   ├── 04-api-surface.md
+│   │   ├── 05-call-flows.md
+│   │   ├── 06-data-model.md
+│   │   ├── 07-runtime-deployment.md
+│   │   ├── 08-testing-quality.md
+│   │   ├── 09-security-auth.md
+│   │   ├── 10-observability-ops.md
+│   │   └── 11-open-questions.md
+│   └── rules/
+│       ├── backend-rules.md
+│       ├── frontend-rules.md
+│       ├── api-rules.md
+│       ├── data-rules.md
+│       ├── infra-rules.md
+│       ├── testing-rules.md
+│       └── docs-rules.md
+├── .claude/
+│   ├── skills/
+│   │   ├── analyze-project/
+│   │   │   └── SKILL.md
+│   │   ├── update-docs/
+│   │   │   └── SKILL.md
+│   │   └── code-review/
+│   │       └── SKILL.md
+│   └── hooks/
+│       ├── check-docs-required.sh
+│       ├── check-api-docs.sh
+│       └── check-tests-required.sh
+└── scripts/
+    ├── ai-check-docs-required.sh
+    ├── ai-check-api-change.sh
+    └── ai-project-inventory.sh
+```
+
+## 4. Example `AGENTS.md` Routing Rules
+
+Use this style:
+
+```md
+# AGENTS.md
+
+## Root behavior
+
+Before making changes, understand the relevant project area.
+Prefer small, targeted changes.
+Do not invent architecture that is not present in the codebase.
+When uncertain, inspect files before answering.
+
+## Rule loading
+
+Use the following routing rules:
+
+| Task type | Additional rule files |
+|---|---|
+| Backend service, controllers, service layer, repositories | `docs/rules/backend-rules.md` |
+| API request/response, OpenAPI, GraphQL, contracts | `docs/rules/api-rules.md` |
+| Database schema, migrations, queries, repositories | `docs/rules/data-rules.md` |
+| Frontend UI, routes, components, state management | `docs/rules/frontend-rules.md` |
+| Docker, Kubernetes, Terraform, CI/CD, deployment | `docs/rules/infra-rules.md` |
+| Unit/integration/e2e tests | `docs/rules/testing-rules.md` |
+| README, design docs, ADRs, project documentation | `docs/rules/docs-rules.md` |
+
+## Workflow routing
+
+If the user asks to analyze, understand, dissect, reverse-engineer, or map the project,
+use the `analyze-project` workflow.
+
+If the user asks to update, sync, refresh, or generate documentation,
+use the `update-docs` workflow.
+
+If the user asks to review code, use the `code-review` workflow.
+
+## Documentation policy
+
+When a change affects public behavior, APIs, configuration, data model, deployment,
+architecture, or operational behavior, update relevant documentation in the same change.
+
+Before finishing, state one of:
+
+- Documentation updated: `<files>`
+- Documentation not needed because: `<reason>`
+```
+
+## 5. Should You Use `xxx/rules.md`?
+
+Yes. This is the right pattern.
+
+But do not create too many rules too early. You want enough separation to route well, but not so much fragmentation that agents miss context.
+
+| Rule file           |                   Keep? | Why                                                   |
+| ------------------- | ----------------------: | ----------------------------------------------------- |
+| `backend-rules.md`  |                     Yes | Common for Java/Spring/FastAPI/service projects       |
+| `frontend-rules.md` | Yes, if frontend exists | UI has different conventions                          |
+| `api-rules.md`      |                     Yes | API contracts deserve explicit discipline             |
+| `data-rules.md`     |                     Yes | DB/schema/query changes are high-risk                 |
+| `infra-rules.md`    |                     Yes | Docker/K8s/Terraform/CI/CD need different constraints |
+| `testing-rules.md`  |                     Yes | Prevents agents from skipping tests                   |
+| `docs-rules.md`     |                     Yes | Centralizes doc update expectations                   |
+| `security-rules.md` |  Optional separate file | Use if auth/permissions are substantial               |
+| `ai-rules.md`       |                Optional | Use if this is an AI/agent/RAG/LLM project            |
+
+For your projects, I would use:
+
+```text
+docs/rules/
+├── backend-rules.md
+├── api-rules.md
+├── data-rules.md
+├── infra-rules.md
+├── testing-rules.md
+├── docs-rules.md
+└── ai-agent-rules.md
+```
+
+## 6. Project Understanding Docs: Are 3 Files Enough?
+
+You proposed:
+
+1. Tech stack, frameworks, versions
+2. Business idea and features
+3. APIs and call stack flows
+
+These are necessary, but not sufficient.
+
+For serious project analysis, you need at least these dimensions:
+
+| File                       | Purpose                                             | Why it matters                                  |
+| -------------------------- | --------------------------------------------------- | ----------------------------------------------- |
+| `00-index.md`              | Map of all project-intel docs                       | Gives the agent a navigation entry point        |
+| `01-business-domain.md`    | Business idea, users, features, domain vocabulary   | Prevents code-only understanding                |
+| `02-tech-stack.md`         | Languages, frameworks, versions, package managers   | Helps with correct commands and conventions     |
+| `03-architecture.md`       | Modules, layers, bounded contexts, major components | Needed for design-level reasoning               |
+| `04-api-surface.md`        | REST/GraphQL/events/CLI endpoints                   | Shows external contracts                        |
+| `05-call-flows.md`         | Request lifecycle and important execution paths     | Critical for debugging and feature work         |
+| `06-data-model.md`         | Entities, tables, migrations, schemas, ownership    | Needed for persistence and business correctness |
+| `07-runtime-deployment.md` | Local run, Docker, env vars, cloud resources        | Needed to actually operate the app              |
+| `08-testing-quality.md`    | Test types, commands, coverage gaps, fixtures       | Prevents unsafe edits                           |
+| `09-security-auth.md`      | AuthN/AuthZ, roles, secrets, permissions            | Critical for real systems                       |
+| `10-observability-ops.md`  | Logs, metrics, traces, alerts, runbooks             | Needed for production thinking                  |
+| `11-open-questions.md`     | Ambiguities, TODOs, risks, suspected issues         | Prevents hallucinated certainty                 |
+
+So I would not do only 3. I would do **12 small files**.
+
+## 7. Minimal vs Serious Version
+
+| Version    |       Files | Best for                                                       |
+| ---------- | ----------: | -------------------------------------------------------------- |
+| Minimal    |   3–4 files | Small toy app, prototype                                       |
+| Practical  |     8 files | Real local project with backend/frontend/db                    |
+| Serious    |    12 files | Production-like project, interview portfolio, AI agent project |
+| Enterprise | 15–25 files | Large mono-repo, many services, infra, compliance              |
+
+For your goal — AI architect / senior engineer / big tech prep — use the **serious 12-file version**.
+
+## 8. Recommended `docs/project-intel/` Files
+
+### 8.1 `00-index.md`
+
+Purpose:
+
+```text
+Navigation map.
+What each doc covers.
+Where to start for backend/frontend/api/data/infra/debugging.
+```
+
+### 8.2 `01-business-domain.md`
+
+Include:
+
+```text
+- Product idea
+- User personas
+- Core workflows
+- Feature list
+- Domain vocabulary
+- Business rules
+- Non-goals
+```
+
+### 8.3 `02-tech-stack.md`
+
+Include:
+
+```text
+- Language versions
+- Framework versions
+- Package managers
+- Runtime versions
+- Build tools
+- Important dependencies
+- Local commands
+- Version source of truth
+```
+
+### 8.4 `03-architecture.md`
+
+Include:
+
+```text
+- High-level architecture
+- Module boundaries
+- Layering
+- Dependency direction
+- Important patterns
+- Anti-patterns to avoid
+```
+
+### 8.5 `04-api-surface.md`
+
+Include:
+
+```text
+- REST endpoints
+- GraphQL schema
+- Event topics/queues
+- Request/response models
+- Auth requirements
+- Error contracts
+```
+
+### 8.6 `05-call-flows.md`
+
+Include:
+
+```text
+- Main request flows
+- Controller -> service -> repository path
+- Async/event flows
+- Startup flow
+- Background jobs
+- Error paths
+```
+
+### 8.7 `06-data-model.md`
+
+Include:
+
+```text
+- Tables/entities/documents
+- Relationships
+- Migrations
+- Indexes
+- Ownership
+- Read/write patterns
+```
+
+### 8.8 `07-runtime-deployment.md`
+
+Include:
+
+```text
+- How to run locally
+- Env vars
+- Docker setup
+- Kubernetes/Terraform if relevant
+- Deployment topology
+- External services
+```
+
+### 8.9 `08-testing-quality.md`
+
+Include:
+
+```text
+- Unit test commands
+- Integration test commands
+- E2E test commands
+- Fixtures/test data
+- Current gaps
+- What must be tested before PR
+```
+
+### 8.10 `09-security-auth.md`
+
+Include:
+
+```text
+- Authentication
+- Authorization
+- Roles/permissions
+- Secret handling
+- CORS/CSRF if relevant
+- Sensitive data handling
+```
+
+### 8.11 `10-observability-ops.md`
+
+Include:
+
+```text
+- Logs
+- Metrics
+- Traces
+- Health checks
+- Alerts
+- Runbook links
+- Known failure modes
+```
+
+### 8.12 `11-open-questions.md`
+
+Include:
+
+```text
+- Unknowns
+- Confusing code areas
+- Inconsistent naming
+- Missing tests
+- Missing docs
+- Suspected design debt
+- Follow-up investigation list
+```
+
+## 9. What You Missed in the Original 3 Files
+
+| Your original file             | Good coverage            | Missing dimensions                                               |
+| ------------------------------ | ------------------------ | ---------------------------------------------------------------- |
+| Tech stack/frameworks/versions | Tooling and dependencies | Runtime, commands, package managers, version source of truth     |
+| Business idea/features         | Product intent           | Domain rules, personas, workflows, non-goals                     |
+| APIs/call stack flows          | Behavior surface         | Data model, auth, errors, async flows, observability, deployment |
+
+The biggest things you missed:
+
+```text
+1. Data model
+2. Architecture boundaries
+3. Runtime/deployment
+4. Testing strategy
+5. Security/auth
+6. Observability
+7. Known risks/open questions
+8. Decision log / ADRs
+```
+
+## 10. Best Prompt to Ask AI to Generate These Files
+
+Use this prompt in your coding agent:
+
+```text
+Analyze this repository and create a project understanding package under:
+
+docs/project-intel/
+
+Create these files:
+
+00-index.md
+01-business-domain.md
+02-tech-stack.md
+03-architecture.md
+04-api-surface.md
+05-call-flows.md
+06-data-model.md
+07-runtime-deployment.md
+08-testing-quality.md
+09-security-auth.md
+10-observability-ops.md
+11-open-questions.md
+
+Rules:
+
+1. Inspect the repository before writing.
+2. Do not invent functionality.
+3. Distinguish confirmed facts from inferred assumptions.
+4. Include file paths and code references where useful.
+5. Keep each file concise but implementation-grounded.
+6. If something is unknown, put it in 11-open-questions.md.
+7. Prefer tables for inventory-style information.
+8. Include local commands only if verified from package files, build files, scripts, Dockerfiles, or README.
+9. After creating the docs, summarize:
+   - what was confidently understood
+   - what remains uncertain
+   - what files are the best entry points for future agents
+```
+
+## 11. Best Layered Setup for Your Case
+
+Use this:
+
+```text
+AGENTS.md
+docs/rules/
+docs/project-intel/
+.claude/skills/
+.claude/hooks/
+scripts/
+```
+
+| Goal                     | File/location                           |
+| ------------------------ | --------------------------------------- |
+| Root behavior            | `AGENTS.md`                             |
+| Routing rules            | `AGENTS.md`                             |
+| Domain-specific rules    | `docs/rules/*.md`                       |
+| Project understanding    | `docs/project-intel/*.md`               |
+| Repeatable workflows     | `.claude/skills/*/SKILL.md`             |
+| Deterministic automation | `.claude/hooks/*.sh` and `scripts/*.sh` |
+| PR enforcement           | CI                                      |
+
+## 12. Final Recommendation
+
+For your local AI-assisted project, do this:
+
+```text
+1. Create AGENTS.md as the root router.
+2. Create docs/rules/ for backend, API, data, infra, testing, docs, AI-agent behavior.
+3. Create .claude/skills/ for reusable workflows:
+   - analyze-project
+   - update-docs
+   - code-review
+   - add-feature
+   - debug-issue
+4. Create hooks that call scripts, not skills.
+5. Create docs/project-intel/ with 12 files, not only 3.
+```
+
+Your best rule of thumb:
+
+```text
+AGENTS.md tells the agent WHEN.
+rules.md tells the agent HOW in a domain.
+Skill tells the agent HOW to execute a repeatable workflow.
+Hook checks WHETHER required conditions were satisfied.
+Script performs deterministic validation.
+CI makes it non-negotiable.
+```
+
+That is the clean layered architecture.
